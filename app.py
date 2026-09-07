@@ -42,8 +42,8 @@ with st.sidebar:
         "Tipo de material", ["intrínseco", "tipo n", "tipo p"],
         index=["intrínseco", "tipo n", "tipo p"].index(st.session_state.tipo_material))
 
-    opciones_Na = sorted(set([10**e for e in range(13, 22)] + [c.N_A_DEFAULT]))
-    opciones_Nd = sorted(set([10**e for e in range(13, 22)] + [c.N_D_DEFAULT]))
+    opciones_Na = sorted(set([10.0**e for e in range(13, 22)] + [c.N_A_DEFAULT]))
+    opciones_Nd = sorted(set([10.0**e for e in range(13, 22)] + [c.N_D_DEFAULT]))
     st.session_state.Na_cm3 = st.select_slider(
         "Dopaje aceptores N_A [cm^-3]",
         options=opciones_Na, value=st.session_state.Na_cm3)
@@ -63,9 +63,9 @@ with st.sidebar:
 
     st.session_state.delta_n_cm3 = st.select_slider(
         "Nivel de inyección Δn [cm^-3]",
-        options=[10**e for e in range(12, 19)], value=st.session_state.delta_n_cm3)
+        options=[10.0**e for e in range(12, 19)], value=st.session_state.delta_n_cm3)
 
-    opciones_S = sorted(set([10**e for e in range(0, 7)] + [c.S_FRONTAL_DEFAULT]))
+    opciones_S = sorted(set([10.0**e for e in range(0, 7)] + [c.S_FRONTAL_DEFAULT]))
     st.session_state.S_frontal_cm_s = st.select_slider(
         "Velocidad de recombinación superficial S [cm/s]",
         options=opciones_S, value=st.session_state.S_frontal_cm_s)
@@ -157,14 +157,30 @@ with tab1:
         ax3.legend()
         st.pyplot(fig3)
 
+    # n_i²(T) recalculado a los T, m_e, m_h, E_g actuales (no un valor fijo de
+    # referencia a 300 K): si el material ya está en condición intrínseca se
+    # reusan n_num/p_num; si está dopado, se resuelve E_F intrínseco aparte
+    # (Na=Nd=0) para obtener n_i(T) por integración numérica, y se calcula
+    # también la forma cerrada de Boltzmann Nc*Nv*exp(-Eg/kT).
+    if tipo == "intrínseco":
+        n_i_num, p_i_num = n_num, p_num
+    else:
+        Ef_i_eV = f.resolver_ef(T_K, 0.0, 0.0, Ec_eV, Ev_eV, me_kg, mh_kg)
+        n_i_num = f.n_numerico(Ef_i_eV, T_K, Ec_eV, me_kg)
+        p_i_num = f.p_numerico(Ef_i_eV, T_K, Ev_eV, mh_kg)
+    ni2_num = n_i_num * p_i_num
+    ni2_boltz = Nc_cm3 * Nv_cm3 * np.exp(-Ec_eV / (c.K_B_EV * T_K))
+
     st.subheader("Integración numérica vs. aproximación de Boltzmann")
     tabla_comparacion = {
-        "": ["n [cm⁻³]", "p [cm⁻³]", "n·p [cm⁻⁶]"],
-        "Integración numérica": [f"{n_num:.4e}", f"{p_num:.4e}", f"{n_num*p_num:.4e}"],
-        "Aprox. de Boltzmann": [f"{n_boltz:.4e}", f"{p_boltz:.4e}", f"{n_boltz*p_boltz:.4e}"],
-        "n_i² de referencia": ["-", "-", f"{c.NI_SI_300K**2:.4e}"],
+        "": ["n [cm⁻³]", "p [cm⁻³]", "n·p [cm⁻⁶]", "n_i²(T) [cm⁻⁶]"],
+        "Integración numérica": [f"{n_num:.4e}", f"{p_num:.4e}", f"{n_num*p_num:.4e}", f"{ni2_num:.4e}"],
+        "Aprox. de Boltzmann": [f"{n_boltz:.4e}", f"{p_boltz:.4e}", f"{n_boltz*p_boltz:.4e}", f"{ni2_boltz:.4e}"],
     }
     st.table(tabla_comparacion)
+    st.caption(f"n_i²(T) se recalcula a la T, m_e, m_h y E_g actuales (T={T_K:.0f} K) — no es un valor fijo "
+               f"de 300 K. A 300 K con los parámetros por defecto del curso, n_i²(T) ≈ {c.NI_SI_300K**2:.2e} "
+               f"cm⁻⁶ (V1 de la pestaña de Validación).")
     if Na_cm3 >= 1e19 or Nd_cm3 >= 1e19:
         st.caption("Dopaje ≥10¹⁹ cm⁻³: régimen degenerado esperado — la aproximación "
                    "de Boltzmann debería divergir notoriamente de la integración numérica "
