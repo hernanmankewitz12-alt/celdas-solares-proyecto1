@@ -175,8 +175,9 @@ with tab1:
 # ---------------------------------------------------------------------------
 with tab2:
     st.header("El bloque de silicio")
-    st.caption("La red se dibuja en 2D como aproximación del cristal de silicio real (diamante, 3D); "
-               "los enlaces covalentes se representan como líneas entre vecinos.")
+    st.caption("Red cristalina real del silicio (estructura diamante, tetraédrica): cada átomo se "
+               "enlaza a sus 4 vecinos más cercanos en 3D. No es una simplificación 2D — los enlaces "
+               "covalentes se calculan por distancia geométrica real de la estructura diamante.")
 
     # -------------------------------------------------------------------
     # Mapeo declarado partícula <-> concentración (convención de visualización,
@@ -196,10 +197,37 @@ with tab2:
                f"(máx. {MAX_SIMBOLOS_VIS} símbolos por especie). Ejemplo con los valores actuales: "
                f"n={n_num:.2e} cm⁻³ → {num_simbolos(n_num)} electrones dibujados.")
 
-    N_LADO = 9  # red cuadrada N_LADO x N_LADO (aprox. 2D)
-    xs_red, ys_red = np.meshgrid(np.arange(N_LADO), np.arange(N_LADO))
-    xs_red, ys_red = xs_red.ravel(), ys_red.ravel()
-    n_sitios = len(xs_red)
+    # -------------------------------------------------------------------
+    # Red cristalina 3D: estructura diamante real del silicio (FCC + base de
+    # 2 átomos por sitio de red -> 8 átomos por celda convencional). Los
+    # enlaces se calculan por distancia geométrica real de primer vecino
+    # (a*sqrt(3)/4 en unidades de la celda convencional), no se dibujan a
+    # mano. Los átomos de la superficie del bloque quedan con menos de 4
+    # enlaces (enlaces insatisfechos) — el mismo efecto que motiva la
+    # recombinación superficial de la Pestaña 3.
+    # -------------------------------------------------------------------
+    N_CELDAS_LADO = 2  # celdas convencionales por lado (2x2x2 -> 64 átomos)
+
+    def generar_red_diamante(n_celdas):
+        base_fcc = np.array([[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]])
+        base_diamante = np.vstack([base_fcc, base_fcc + np.array([0.25, 0.25, 0.25])])
+        atomos = []
+        for i in range(n_celdas):
+            for j in range(n_celdas):
+                for k in range(n_celdas):
+                    atomos.append(base_diamante + np.array([i, j, k], dtype=float))
+        atomos = np.vstack(atomos)
+        d_enlace = np.sqrt(3) / 4  # distancia de primer vecino en la red diamante (a=1)
+        enlaces = []
+        for i in range(len(atomos)):
+            dists = np.linalg.norm(atomos[i + 1:] - atomos[i], axis=1)
+            vecinos = np.where(np.abs(dists - d_enlace) < 1e-3)[0]
+            enlaces.extend((i, i + 1 + v) for v in vecinos)
+        return atomos, enlaces
+
+    atomos_red, enlaces_red = generar_red_diamante(N_CELDAS_LADO)
+    n_sitios = len(atomos_red)
+    LADO = float(N_CELDAS_LADO)
 
     n_donores_dibujo = num_simbolos(Nd_cm3) if tipo == "tipo n" else 0
     n_aceptores_dibujo = num_simbolos(Na_cm3) if tipo == "tipo p" else 0
@@ -213,50 +241,55 @@ with tab2:
     sitios_aceptores = sitios_dopantes[n_donores_dibujo:n_donores_dibujo + n_aceptores_dibujo]
 
     rng_carga = np.random.default_rng(abs(hash((n_electrones_dibujo, n_huecos_dibujo))) % (2**32))
-    pos_electrones = rng_carga.uniform(-0.5, N_LADO - 0.5, size=(n_electrones_dibujo, 2))
-    pos_huecos = rng_carga.uniform(-0.5, N_LADO - 0.5, size=(n_huecos_dibujo, 2))
+    pos_electrones = rng_carga.uniform(0, LADO, size=(n_electrones_dibujo, 3))
+    pos_huecos = rng_carga.uniform(0, LADO, size=(n_huecos_dibujo, 3))
 
     def dibujar_bloque(ax, extra_generacion=None, extra_recombinacion=None):
-        # enlaces covalentes: líneas a vecino derecho y superior
-        for i in range(n_sitios):
-            xi, yi = xs_red[i], ys_red[i]
-            if xi + 1 < N_LADO:
-                ax.plot([xi, xi + 1], [yi, yi], color="lightgray", zorder=1, linewidth=1)
-            if yi + 1 < N_LADO:
-                ax.plot([xi, xi], [yi, yi + 1], color="lightgray", zorder=1, linewidth=1)
+        # enlaces covalentes tetraédricos (líneas 3D entre primeros vecinos reales)
+        for i, j in enlaces_red:
+            xs, ys, zs = zip(atomos_red[i], atomos_red[j])
+            ax.plot(xs, ys, zs, color="lightgray", linewidth=1.2, zorder=1)
         # átomos de silicio de la red
-        ax.scatter(xs_red, ys_red, color="silver", s=120, zorder=2, label="Si (red)")
+        ax.scatter(atomos_red[:, 0], atomos_red[:, 1], atomos_red[:, 2],
+                   color="silver", s=90, zorder=2, label="Si (red)")
         # dopantes sustitucionales, ya ionizados (iones fijos)
         if len(sitios_donores):
-            ax.scatter(xs_red[sitios_donores], ys_red[sitios_donores], color="green", s=160,
+            p3 = atomos_red[sitios_donores]
+            ax.scatter(p3[:, 0], p3[:, 1], p3[:, 2], color="green", s=150,
                        marker="P", zorder=3, label="P⁺ (donor ionizado)")
         if len(sitios_aceptores):
-            ax.scatter(xs_red[sitios_aceptores], ys_red[sitios_aceptores], color="orange", s=160,
+            p3 = atomos_red[sitios_aceptores]
+            ax.scatter(p3[:, 0], p3[:, 1], p3[:, 2], color="orange", s=150,
                        marker="X", zorder=3, label="B⁻ (aceptor ionizado)")
         # portadores móviles
         if len(pos_electrones):
-            ax.scatter(pos_electrones[:, 0], pos_electrones[:, 1], color="blue", s=50,
-                       marker="o", zorder=4, label="e⁻ móvil")
+            ax.scatter(pos_electrones[:, 0], pos_electrones[:, 1], pos_electrones[:, 2],
+                       color="blue", s=45, marker="o", zorder=4, label="e⁻ móvil")
         if len(pos_huecos):
-            ax.scatter(pos_huecos[:, 0], pos_huecos[:, 1], facecolors="none", edgecolors="red",
-                       s=50, marker="o", zorder=4, label="hueco móvil")
+            ax.scatter(pos_huecos[:, 0], pos_huecos[:, 1], pos_huecos[:, 2],
+                       facecolors="none", edgecolors="red", s=45, marker="o", zorder=4, label="hueco móvil")
         if extra_generacion is not None and len(extra_generacion):
-            ax.scatter(extra_generacion[:, 0], extra_generacion[:, 1], color="gold", s=220,
-                       marker="*", zorder=5, label="generación e⁻-h⁺")
+            ax.scatter(extra_generacion[:, 0], extra_generacion[:, 1], extra_generacion[:, 2],
+                       color="gold", s=200, marker="*", zorder=5, label="generación e⁻-h⁺")
         if extra_recombinacion is not None and len(extra_recombinacion):
-            ax.scatter(extra_recombinacion[:, 0], extra_recombinacion[:, 1], color="black", s=140,
-                       marker="x", zorder=5, label="recombinación")
-        ax.set_xlim(-1, N_LADO)
-        ax.set_ylim(-1, N_LADO)
-        ax.set_aspect("equal")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=8)
+            ax.scatter(extra_recombinacion[:, 0], extra_recombinacion[:, 1], extra_recombinacion[:, 2],
+                       color="black", s=130, marker="x", zorder=5, label="recombinación")
+        ax.set_xlim(-0.3, LADO + 0.3)
+        ax.set_ylim(-0.3, LADO + 0.3)
+        ax.set_zlim(-0.3, LADO + 0.3)
+        try:
+            ax.set_box_aspect((1, 1, 1))
+        except AttributeError:
+            pass
+        ax.view_init(elev=18, azim=35)
+        ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
+        ax.legend(loc="upper left", bbox_to_anchor=(1.05, 1.0), fontsize=8)
 
     col_fig, col_datos = st.columns([2, 1])
     with col_fig:
         placeholder_bloque = st.empty()
-        fig_b, ax_b = plt.subplots(figsize=(5, 5))
+        fig_b = plt.figure(figsize=(6, 6))
+        ax_b = fig_b.add_subplot(111, projection="3d")
         dibujar_bloque(ax_b)
         placeholder_bloque.pyplot(fig_b)
         plt.close(fig_b)
@@ -264,20 +297,25 @@ with tab2:
         if st.button("▶ Reproducir generación/recombinación térmica"):
             n_frames = 24
             # tasa de eventos por frame: crece con T (declarado, adimensional
-            # de visualización, no una tasa física calibrada).
+            # de visualización, no una tasa física calibrada) — hace visible
+            # que la generación/recombinación térmica se acelera con T.
             tasa_por_frame = max(1, round(T_K / 100))
             for _ in range(n_frames):
-                gen = rng_carga.uniform(0, N_LADO - 1, size=(tasa_por_frame, 2))
-                recomb = rng_carga.uniform(0, N_LADO - 1, size=(tasa_por_frame, 2))
-                fig_a, ax_a = plt.subplots(figsize=(5, 5))
+                gen = rng_carga.uniform(0, LADO, size=(tasa_por_frame, 3))
+                recomb = rng_carga.uniform(0, LADO, size=(tasa_por_frame, 3))
+                fig_a = plt.figure(figsize=(6, 6))
+                ax_a = fig_a.add_subplot(111, projection="3d")
                 dibujar_bloque(ax_a, extra_generacion=gen, extra_recombinacion=recomb)
                 placeholder_bloque.pyplot(fig_a)
                 plt.close(fig_a)
                 time.sleep(0.12)
-            fig_b, ax_b = plt.subplots(figsize=(5, 5))
+            fig_b = plt.figure(figsize=(6, 6))
+            ax_b = fig_b.add_subplot(111, projection="3d")
             dibujar_bloque(ax_b)
             placeholder_bloque.pyplot(fig_b)
             plt.close(fig_b)
+        st.caption(f"Tasa de eventos por cuadro de animación: {max(1, round(T_K/100))} pares/cuadro a "
+                   f"T={T_K:.0f} K (crece con T: 1 par/cuadro a 100 K, hasta 6 a 600 K).")
 
     with col_datos:
         st.metric("n (numérico)", f"{n_num:.3e} cm⁻³")
