@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --bg:#0b1020; --card:#111831; --line:rgba(255,255,255,.08); --text:#e6e9f2; --dim:#96a0b8;
+    --amber:#f5b83d; --e:#4da3ff; --h:#ff5a5f; --rad:#ffe066; --aug:#ff8c42; --srh:#b07cff; --surf:#2ec4b6;
+  }
+  html,body{margin:0;background:var(--bg);color:var(--text);font:12.5px/1.4 "Segoe UI",system-ui,sans-serif}
+  #grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:2px}
+  @media (max-width:760px){ #grid{grid-template-columns:1fr} }
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    display:flex;flex-direction:column;transition:border-color .3s, box-shadow .3s}
+  .card.dom{border-color:var(--amber);box-shadow:0 0 0 1px rgba(245,184,61,.35),0 0 22px rgba(245,184,61,.12)}
+  .hd{display:flex;align-items:center;gap:8px;padding:9px 12px 4px;flex-wrap:wrap}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .nm{font-weight:650;font-size:13.5px}
+  .chip{font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);
+    color:var(--dim);font-variant-numeric:tabular-nums}
+  .chip b{color:var(--text);font-weight:600}
+  .pill{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    background:var(--amber);color:#1a1300;padding:2px 8px;border-radius:999px;margin-left:auto}
+  canvas{width:100%;height:250px;display:block}
+  .cap{padding:4px 12px 10px;min-height:36px;color:#cfd5e4;font-size:12px}
+  .cap .st{color:var(--dim);font-variant-numeric:tabular-nums;margin-right:6px}
+  #bar{display:flex;gap:8px;align-items:center;padding:8px 2px 2px;color:var(--dim);font-size:11.5px}
+  button{background:#1b2440;color:var(--text);border:1px solid #2c3760;border-radius:8px;padding:5px 10px;font:inherit;cursor:pointer}
+  button:hover{background:#243058}
+  button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  input[type=range]{width:90px;accent-color:var(--amber)}
+</style>
+</head>
+<body>
+<div id="grid"></div>
+<div id="bar">
+  <button id="bP">⏸ Pausa</button>
+  <label>velocidad <input id="vel" type="range" min="0.25" max="2" step="0.25" value="1"></label>
+  <span style="margin-left:auto">Diagramas de bandas esquemáticos (eje vertical = energía). Fila inferior = átomos de la red: se agitan cuando reciben fonones (calor).</span>
+</div>
+
+<script>
+const P = __PARAMS__;
+const C = { e:'#4da3ff', h:'#ff5a5f', rad:'#ffe066', aug:'#ff8c42', srh:'#b07cff', surf:'#2ec4b6',
+  heat:'#ff9a52', dim:'#96a0b8', text:'#e6e9f2' };
+const LAMBDA = 1239.84 / P.Eg;
+function lambdaColor(nm){
+  if (nm > 780) return '#ff3d6e'; if (nm < 380) return '#9b5de5';
+  let r=0,g=0,b=0;
+  if(nm<440){r=-(nm-440)/60;b=1}else if(nm<490){g=(nm-440)/50;b=1}else if(nm<510){g=1;b=-(nm-510)/20}
+  else if(nm<580){r=(nm-510)/70;g=1}else if(nm<645){r=1;g=-(nm-645)/65}else{r=1}
+  return `rgb(${r*255|0},${g*255|0},${b*255|0})`;
+}
+const PH = lambdaColor(LAMBDA);
+function fmtT(s){
+  if (!isFinite(s)) return '∞';
+  if (s >= 1) return s.toPrecision(3) + ' s';
+  if (s >= 1e-3) return (s*1e3).toPrecision(3) + ' ms';
+  if (s >= 1e-6) return (s*1e6).toPrecision(3) + ' μs';
+  return (s*1e9).toPrecision(3) + ' ns';
+}
+const lerp = (a,b,u) => a + (b-a)*u;
+const clamp = (x,a,b) => Math.max(a, Math.min(b, x));
+const ease = u => u < .5 ? 2*u*u : 1 - Math.pow(-2*u+2, 2)/2;
+const seg = (t, a, b) => clamp((t-a)/(b-a), 0, 1);
+
+// ---------------------------------------------------------------------------
+// Utilidades de dibujo comunes
+// ---------------------------------------------------------------------------
+function makePanel(def){
+  const card = document.createElement('div'); card.className = 'card' + (P.dom === def.key ? ' dom' : '');
+  const share = P.share[def.key];
+  card.innerHTML = `<div class="hd"><span class="dot" style="background:${def.col}"></span><span class="nm">${def.nm}</span>
+    <span class="chip">τ = <b>${fmtT(P.tau[def.key])}</b></span>
+    <span class="chip"><b>${share < .1 ? '<0.1' : share.toFixed(share < 10 ? 1 : 0)}%</b> de 1/τ<sub>eff</sub></span>
+    ${def.extra ? `<span class="chip">${def.extra}</span>` : ''}
+    ${P.dom === def.key ? '<span class="pill">domina a Δn actual</span>' : ''}</div>
+    <canvas></canvas><div class="cap"></div>`;
+  document.getElementById('grid').appendChild(card);
+  const cv = card.querySelector('canvas'), cap = card.querySelector('.cap');
+  return Object.assign(def, { cv, cap, ctx: cv.getContext('2d'), t: 0, cyc: -1, heat: 0, phonons: [], flashes: [], lastCap: '' });
+}
+function geom(p){
+  const W = p.cv.clientWidth, H = p.cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (p.cv.width !== Math.round(W*dpr) || p.cv.height !== Math.round(H*dpr)){ p.cv.width = Math.round(W*dpr); p.cv.height = Math.round(H*dpr); }
+  p.ctx.setTransform(dpr,0,0,dpr,0,0);
+  const yC = H*.30, yV = H*.66;
+  return { W, H, yC, yV, gap: yV - yC, latY: H - 17, bandBot: H - 34 };
+}
+function drawBands(p, g, opts = {}){
+  const x = p.ctx, { W, H, yC, yV, latY, bandBot } = g;
+  x.clearRect(0,0,W,H);
+  let gr = x.createLinearGradient(0, 4, 0, yC);
+  gr.addColorStop(0,'rgba(77,163,255,.02)'); gr.addColorStop(1,'rgba(77,163,255,.20)');
+  x.fillStyle = gr; x.fillRect(0, 4, W, yC - 4);
+  gr = x.createLinearGradient(0, yV, 0, bandBot);
+  gr.addColorStop(0,'rgba(255,90,95,.22)'); gr.addColorStop(1,'rgba(255,90,95,.03)');
+  x.fillStyle = gr; x.fillRect(0, yV, W, bandBot - yV);
+  x.lineWidth = 2; x.strokeStyle = 'rgba(77,163,255,.9)'; x.beginPath(); x.moveTo(0,yC); x.lineTo(W,yC); x.stroke();
+  x.strokeStyle = 'rgba(255,90,95,.9)'; x.beginPath(); x.moveTo(0,yV); x.lineTo(W,yV); x.stroke();
+  x.font = '600 11px Segoe UI, system-ui'; x.fillStyle = C.e; x.fillText('E_C', 6, yC - 5);
+  x.fillStyle = C.h; x.fillText('E_V', 6, yV + 14);
+  x.fillStyle = 'rgba(230,233,242,.55)'; x.font = '10px Segoe UI, system-ui';
+  x.fillText('banda de conducción', 34, 16); x.fillText('banda de valencia', 34, bandBot - 5);
+  // flecha E_g
+  const ax = 16; x.strokeStyle = 'rgba(230,233,242,.5)'; x.lineWidth = 1;
+  x.beginPath(); x.moveTo(ax, yC + 4); x.lineTo(ax, yV - 4); x.stroke();
+  x.beginPath(); x.moveTo(ax-3, yC+9); x.lineTo(ax, yC+4); x.lineTo(ax+3, yC+9);
+  x.moveTo(ax-3, yV-9); x.lineTo(ax, yV-4); x.lineTo(ax+3, yV-9); x.stroke();
+  x.fillStyle = 'rgba(230,233,242,.75)'; x.fillText(`E_g = ${P.Eg.toFixed(2)} eV`, ax + 6, (yC + yV)/2 + 3);
+  // red cristalina (fila de átomos) que vibra con el calor acumulado
+  const n = Math.floor(W / 18), amp = .6 + 4.5*p.heat;
+  for (let i=0;i<n;i++){
+    const cx = 10 + i*(W-20)/(n-1), cy = latY + amp*Math.sin(p.clock*22 + i*1.7);
+    if (i < n-1){ x.strokeStyle = 'rgba(125,137,166,.35)'; x.beginPath(); x.moveTo(cx, cy); x.lineTo(10 + (i+1)*(W-20)/(n-1), latY + amp*Math.sin(p.clock*22 + (i+1)*1.7)); x.stroke(); }
+    x.fillStyle = p.heat > .05 ? mix('#aab4c8', C.heat, Math.min(1, p.heat*1.4)) : '#aab4c8';
+    x.beginPath(); x.arc(cx, cy, 3.2, 0, 6.3); x.fill();
+  }
+}
+function mix(a, b, u){
+  const pa = [1,3,5].map(i => parseInt(a.slice(i,i+2),16)), pb = [1,3,5].map(i => parseInt(b.slice(i,i+2),16));
+  return `rgb(${pa.map((v,i)=>Math.round(lerp(v,pb[i],u))).join(',')})`;
+}
+function glow(x, cx, cy, r, col, a = .55){
+  const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+  g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.globalAlpha = a; x.fillStyle = g; x.beginPath(); x.arc(cx, cy, r, 0, 6.3); x.fill(); x.globalAlpha = 1;
+}
+function drawE(x, cx, cy, hot = 0){
+  glow(x, cx, cy, 15 + 10*hot, hot ? mix('#4da3ff', '#ff9a52', hot) : C.e, .6 + .3*hot);
+  x.fillStyle = hot ? mix('#4da3ff', '#ffd199', hot) : C.e; x.beginPath(); x.arc(cx, cy, 6, 0, 6.3); x.fill();
+  x.fillStyle = '#0b1020'; x.fillRect(cx - 3, cy - .8, 6, 1.6);
+}
+function drawH(x, cx, cy, hot = 0){
+  glow(x, cx, cy, 14 + 10*hot, hot ? mix('#ff5a5f', '#ff9a52', hot) : C.h, .45 + .3*hot);
+  x.strokeStyle = hot ? mix('#ff5a5f', '#ffd199', hot) : C.h; x.lineWidth = 2.4;
+  x.beginPath(); x.arc(cx, cy, 5.6, 0, 6.3); x.stroke();
+  x.fillStyle = x.strokeStyle; x.fillRect(cx - 2.6, cy - .7, 5.2, 1.4); x.fillRect(cx - .7, cy - 2.6, 1.4, 5.2);
+}
+function wave(x, x0, y, len, col, dir = 1, t = 0){
+  x.strokeStyle = col; x.lineWidth = 2; x.beginPath();
+  for (let s=0; s<=len; s+=1.5){ const px = x0 - dir*s, py = y + 5*Math.sin((s + t*140)/5.5) * Math.sin(Math.PI*s/len); s ? x.lineTo(px, py) : x.moveTo(px, py); }
+  x.stroke(); glow(x, x0, y, 12, col, .6);
+  x.fillStyle = col; x.beginPath(); x.moveTo(x0 + dir*7, y); x.lineTo(x0 - dir*2, y - 5); x.lineTo(x0 - dir*2, y + 5); x.fill();
+}
+// Fonón: pequeño paquete ondulado que viaja hacia la red y la calienta
+function phonon(p, x0, y0, latY){ p.phonons.push({ x:x0, y:y0, vy: 95, latY }); }
+function flash(p, x0, y0, col){ p.flashes.push({ x:x0, y:y0, col, a:0 }); }
+function drawFx(p, dt){
+  const x = p.ctx;
+  for (let i=p.phonons.length-1;i>=0;i--){
+    const f = p.phonons[i]; f.y += f.vy*dt;
+    x.strokeStyle = C.heat; x.lineWidth = 1.6; x.beginPath();
+    for (let s=0;s<=14;s++){ const py = f.y - s, px = f.x + 3*Math.sin(s*1.3 + p.clock*30); s ? x.lineTo(px, py) : x.moveTo(px, py); }
+    x.stroke();
+    if (f.y >= f.latY){ p.heat = Math.min(1, p.heat + .12); p.phonons.splice(i,1); }
+  }
+  for (let i=p.flashes.length-1;i>=0;i--){
+    const f = p.flashes[i]; f.a += dt/.5;
+    glow(x, f.x, f.y, 10 + 34*f.a, f.col, .9*(1 - f.a));
+    if (f.a >= 1) p.flashes.splice(i,1);
+  }
+  p.heat *= Math.exp(-dt/1.6);
+}
+function caption(p, step, text){
+  const s = `<span class="st">${step}</span>${text}`;
+  if (s !== p.lastCap){ p.cap.innerHTML = s; p.lastCap = s; }
+}
+// Dispara un evento sólo una vez por ciclo
+function once(p, id, cond, fn){ const k = p.cyc + ':' + id; if (cond && !p.fired.has(k)){ p.fired.add(k); fn(); } }
+
+// ---------------------------------------------------------------------------
+// 1) Radiativa
+// ---------------------------------------------------------------------------
+const rad = makePanel({ key:'rad', nm:'Radiativa (banda a banda)', col:C.rad, period:5.4,
+  extra:`λ ≈ ${LAMBDA.toFixed(0)} nm${LAMBDA > 780 ? ' (IR)' : ''}`,
+  onCycle(p){ p.reabs = Math.random() < P.p_reabs; },
+  frame(p, t, g){
+    const x = p.ctx, x0 = g.W*.3, xa = g.W*.8, eY = g.yC - 12, hY = g.yV + 12, j = Math.sin(p.clock*9)*1.5;
+    const tFall = 1.0, tHit = 1.7, v = g.W*.42, tStop = tHit + (xa - x0)/v;
+    if (t < tHit){
+      const u = ease(seg(t, tFall, tHit));
+      drawH(x, x0, hY); drawE(x, x0 + j*(1-u), lerp(eY, hY, u*u));
+      if (t < tFall) caption(p, '1/3', 'Un electrón en la banda de conducción y un hueco en la de valencia, en el mismo lugar.');
+      else caption(p, '2/3', 'El electrón cae directamente sobre el hueco, atravesando toda la brecha.');
+    }
+    once(p, 'f', t >= tHit, () => flash(p, x0, hY, PH));
+    if (t >= tHit){
+      if (p.reabs && t >= tStop){
+        once(p, 'r', true, () => flash(p, xa, (g.yC+g.yV)/2, PH));
+        const u = ease(seg(t, tStop, tStop + .6)), my = (g.yC + g.yV)/2;
+        drawE(x, xa, lerp(my, eY, u)); drawH(x, xa, lerp(my, hY, u));
+        caption(p, '3/3', `El fotón se reabsorbe y crea un par nuevo (reciclaje de fotones, p ≈ ${(P.p_reabs*100).toFixed(0)} % con W = ${P.W_um} μm).`);
+      } else {
+        const px = x0 + v*(t - tHit);
+        if (px < g.W + 60) wave(x, px, (g.yC + g.yV)/2, 48, PH, 1, p.clock);
+        caption(p, '3/3', `Toda la energía sale como un fotón hν ≈ E_g (${LAMBDA.toFixed(0)} nm). ${p.reabs ? '' : 'Este escapó del bloque.'}`);
+      }
+    }
+  }});
+
+// ---------------------------------------------------------------------------
+// 2) Auger (eeh en tipo n / intrínseco, ehh en tipo p)
+// ---------------------------------------------------------------------------
+const pType = P.tipo === 'p';
+const aug = makePanel({ key:'auger', nm:'Auger', col:C.aug, period:6.4,
+  extra: pType ? 'tipo p: e⁻ + h⁺ + h⁺' : 'tipo n: e⁻ + e⁻ + h⁺',
+  frame(p, t, g){
+    const x = p.ctx, x0 = g.W*.28, x3 = g.W*.6, eY = g.yC - 12, hY = g.yV + 12;
+    const up = pType ? 1 : -1;                     // dirección "más energía" para el 3er portador
+    const base3 = pType ? hY : eY;
+    const room = pType ? (g.bandBot - 8) - hY : eY - 12;
+    const jump = Math.min(g.gap*.95, room);
+    const tFall = 1.0, tHit = 1.6, tBeam = 2.1, tUp = 2.5, nSt = 6, stD = .34, tEnd = tUp + nSt*stD;
+    const draw3 = (y, hot) => pType ? drawH(x, x3, y, hot) : drawE(x, x3, y, hot);
+    // par que recombina
+    if (t < tHit){
+      const u = ease(seg(t, tFall, tHit));
+      drawH(x, x0, hY); drawE(x, x0, lerp(eY, hY, u*u));
+    }
+    once(p, 'f', t >= tHit, () => flash(p, x0, hY, C.aug));
+    // haz de energía hacia el tercer portador
+    if (t >= tHit && t < tBeam + .4){
+      const u = seg(t, tHit, tBeam), a = 1 - seg(t, tBeam, tBeam + .4);
+      const sx = x0, sy = hY, ex = x3, ey = base3;
+      x.globalAlpha = a; x.strokeStyle = C.aug; x.lineWidth = 2.2; x.setLineDash([6,4]); x.beginPath();
+      for (let s=0; s<=u; s+=.02){ const px = lerp(sx, ex, s), py = lerp(sy, ey, s) - Math.sin(Math.PI*s)*g.gap*.5*(pType ? -1 : 1); s ? x.lineTo(px, py) : x.moveTo(px, py); }
+      x.stroke(); x.setLineDash([]); x.globalAlpha = 1;
+    }
+    // tercer portador: sube ~E_g y luego baja en escalones emitiendo fonones
+    let y3 = base3, hot = 0;
+    if (t >= tBeam && t < tUp){ const u = ease(seg(t, tBeam, tUp)); y3 = base3 + up*jump*u; hot = u; }
+    else if (t >= tUp && t < tEnd){
+      const k = Math.floor((t - tUp)/stD), fr = ((t - tUp) % stD)/stD, stepH = jump/nSt;
+      const drop = fr > .6 ? ease((fr - .6)/.4) : 0;
+      y3 = base3 + up*(jump - stepH*(k + drop)); hot = 1 - (k + drop)/nSt;
+      once(p, 'ph' + k, fr > .6, () => phonon(p, x3, y3, g.latY));
+    }
+    if (t >= tUp - .01 && t < tEnd){
+      x.strokeStyle = 'rgba(255,140,66,.35)'; x.setLineDash([2,3]); x.lineWidth = 1;
+      x.beginPath(); x.moveTo(x3 + 14, base3); x.lineTo(x3 + 14, base3 + up*jump); x.stroke(); x.setLineDash([]);
+      x.fillStyle = 'rgba(255,140,66,.9)'; x.font = '10.5px Segoe UI, system-ui'; x.fillText('≈ E_g', x3 + 19, base3 + up*jump*.5 + 3);
+    }
+    draw3(y3, hot);
+    // el portador "espectador" del mismo tipo que no participa se omite para claridad
+    if (t < tFall) caption(p, '1/4', pType ? 'Tipo p: sobran huecos. Un e⁻ recombina con un hueco y hay otro hueco cerca.' : 'Tipo n / intrínseco: sobran electrones. Un e⁻ recombina con un hueco y hay otro e⁻ cerca.');
+    else if (t < tBeam) caption(p, '2/4', 'El e⁻ cae a la banda de valencia… pero NO sale fotón: la energía E_g pasa por choque al tercer portador.');
+    else if (t < tUp + .3) caption(p, '3/4', `El tercer portador queda “caliente”: sube ≈ E_g ${pType ? 'hacia dentro de la banda de valencia' : 'dentro de la banda de conducción'}.`);
+    else if (t < tEnd + .2) caption(p, '4/4', 'Se termaliza en pocos ps cediendo la energía a la red como fonones → calor.');
+    else caption(p, '✓', 'Resultado: un par menos, cero luz, red más caliente. Crece como Δn² → domina a inyección alta o dopaje alto.');
+  }});
+
+// ---------------------------------------------------------------------------
+// 3) SRH por trampa en E_T
+// ---------------------------------------------------------------------------
+const srh = makePanel({ key:'srh', nm:'SRH (trampas)', col:C.srh, period:6.2,
+  extra: `E_T − E_V = ${(P.Et_frac*P.Eg).toFixed(2)} eV · eficiencia ≈ ${(P.eficiencia*100).toFixed(0)} %`,
+  onCycle(p){ p.ok = Math.random() < P.eficiencia; },
+  frame(p, t, g){
+    const x = p.ctx, xt = g.W*.52, yT = g.yV - P.Et_frac*g.gap, eY = g.yC - 12, hY = g.yV + 12;
+    const nearCB = P.Et_frac >= .5;               // qué portador captura primero la trampa
+    const t1 = 1.0, t2 = 1.8, t3 = 2.6, t4 = 3.4;
+    // nivel de la trampa
+    x.strokeStyle = C.srh; x.lineWidth = 3; x.setLineDash([5,4]); x.beginPath(); x.moveTo(xt - 30, yT); x.lineTo(xt + 30, yT); x.stroke(); x.setLineDash([]);
+    x.fillStyle = C.srh; x.font = '600 11px Segoe UI, system-ui'; x.fillText('E_T (defecto)', xt + 36, yT + 4);
+    const busy = t >= t2 && t < (p.ok ? t4 : t3 + .6);
+    if (busy) glow(x, xt, yT, 26, C.srh, .45 + .2*Math.sin(p.clock*14));
+    // primer portador capturado (el más cercano en energía a la trampa)
+    const first = nearCB ? 'e' : 'h', ex = g.W*.3, hx = g.W*.74;
+    const f0 = nearCB ? { x:ex, y:eY } : { x:hx, y:hY }, s0 = nearCB ? { x:hx, y:hY } : { x:ex, y:eY };
+    const drawF = (a,b) => first === 'e' ? drawE(x,a,b) : drawH(x,a,b);
+    const drawS = (a,b) => first === 'e' ? drawH(x,a,b) : drawE(x,a,b);
+    let fx = f0.x, fy = f0.y, sx = s0.x, sy = s0.y, showF = true, showS = true;
+    if (t >= t1 && t < t2){ const u = ease(seg(t, t1, t2)); fx = lerp(f0.x, xt, u); fy = lerp(f0.y, yT, u); }
+    once(p, 'c1', t >= t2 - .25, () => { const n = Math.max(1, Math.round(Math.abs(yT - f0.y)/g.gap*5)); for (let i=0;i<n;i++) setTimeout(() => phonon(p, xt - 8 + i*4, yT, g.latY), i*90); });
+    if (t >= t2){ fx = xt; fy = yT; }
+    if (p.ok){
+      if (t >= t3 && t < t4){ const u = ease(seg(t, t3, t4)); sx = lerp(s0.x, xt, u); sy = lerp(s0.y, yT, u); }
+      if (t >= t4){ showF = showS = false; }
+      once(p, 'c2', t >= t4, () => { flash(p, xt, yT, C.srh); const n = Math.max(1, Math.round(Math.abs(yT - s0.y)/g.gap*5)); for (let i=0;i<n;i++) setTimeout(() => phonon(p, xt - 8 + i*4, yT, g.latY), i*90); });
+    } else if (t >= t3){
+      const u = ease(seg(t, t3, t3 + .6)); fx = lerp(xt, f0.x + (nearCB ? -20 : 20), u); fy = lerp(yT, f0.y, u);
+      if (u > 0 && u < 1){ x.fillStyle = C.heat; x.font = '600 11px Segoe UI, system-ui'; x.fillText('+kT', fx + 10, fy); }
+    }
+    if (showF) drawF(fx, fy); if (showS) drawS(sx, sy);
+    const who = nearCB ? 'electrón' : 'hueco', other = nearCB ? 'hueco' : 'electrón';
+    if (t < t1) caption(p, '1/3', 'Un defecto del cristal crea un estado permitido E_T dentro de la brecha.');
+    else if (t < t3) caption(p, '2/3', `La trampa captura primero un ${who}; la energía se va como fonones (calor), en dos saltos más pequeños que E_g.`);
+    else if (p.ok) caption(p, '3/3', t < t4 ? `Llega el ${other}: la trampa lo captura también…` : '…y el par desaparece. La trampa queda vacía y lista para repetir. Es el mecanismo dominante en Si de calidad normal.');
+    else caption(p, '3/3', `Trampa cerca de una banda: la agitación térmica reemite al ${who} antes de que llegue el ${other} → no hubo recombinación. Por eso las trampas a mitad de brecha son las más dañinas.`);
+  }});
+
+// ---------------------------------------------------------------------------
+// 4) Superficie: continuo de estados en la brecha
+// ---------------------------------------------------------------------------
+const surf = makePanel({ key:'surf', nm:'Superficie', col:C.surf, period:6.0,
+  extra: `S = ${P.S_txt} cm/s → ${P.n_surf} par${P.n_surf > 1 ? 'es' : ''}/ciclo`,
+  onCycle(p, g){
+    p.pairs = Array.from({ length:P.n_surf }, (_, k) => ({ t0: .25 + k*(3.0/P.n_surf), x0: .12 + Math.random()*.42, lv: .15 + Math.random()*.7 }));
+  },
+  frame(p, t, g){
+    const x = p.ctx, xs = g.W*.84, eY = g.yC - 12, hY = g.yV + 12;
+    // estados de superficie: continuo a lo largo de toda la brecha
+    x.fillStyle = 'rgba(46,196,182,.07)'; x.fillRect(xs, 4, g.W - xs, g.bandBot - 4);
+    x.strokeStyle = C.surf; x.lineWidth = 2; x.beginPath(); x.moveTo(xs, 4); x.lineTo(xs, g.bandBot); x.stroke();
+    x.lineWidth = 1.4;
+    for (let i=1;i<16;i++){ const y = g.yC + i*g.gap/16; x.globalAlpha = .45 + .3*Math.sin(p.clock*3 + i); x.beginPath(); x.moveTo(xs + 3, y); x.lineTo(xs + 16, y); x.stroke(); }
+    x.globalAlpha = 1; x.fillStyle = C.surf; x.font = '600 10.5px Segoe UI, system-ui';
+    x.save(); x.translate(xs + 30, (g.yC + g.yV)/2); x.rotate(-Math.PI/2); x.textAlign = 'center'; x.fillText('estados de superficie', 0, 0); x.restore();
+    let stage = 0;
+    for (const [k, pr] of (p.pairs || []).entries()){
+      const tA = pr.t0, tB = tA + 1.1, tC = tB + .35, tD = tC + .35;
+      if (t < tA) continue;
+      const px0 = pr.x0*g.W, yS = g.yC + pr.lv*g.gap;
+      if (t < tB){ const u = ease(seg(t, tA, tB)), px = lerp(px0, xs - 6, u), j = Math.sin(p.clock*7 + k)*4*(1-u);
+        drawE(x, px, eY + j); drawH(x, px + 4, hY - j); stage = Math.max(stage, 1); }
+      else if (t < tC){ const u = ease(seg(t, tB, tC)); drawE(x, xs + 8, lerp(eY, yS, u)); drawH(x, xs + 8, hY); stage = Math.max(stage, 2);
+        once(p, 'a'+k, u > .9, () => phonon(p, xs - 4, yS, g.latY)); }
+      else if (t < tD){ const u = ease(seg(t, tC, tD)); drawE(x, xs + 8, lerp(yS, hY, u)); drawH(x, xs + 8, hY); stage = Math.max(stage, 2); }
+      else { once(p, 'b'+k, true, () => { flash(p, xs + 8, hY, C.surf); phonon(p, xs - 4, hY, g.latY); }); stage = Math.max(stage, 3); }
+    }
+    if (stage <= 1) caption(p, '1/2', 'Los portadores difunden hacia la cara. Allí el cristal se corta y quedan enlaces insatisfechos.');
+    else caption(p, '2/2', `Los enlaces rotos dan estados a TODAS las energías de la brecha: capturan e⁻ y h⁺ sin importar su energía. Más S = más pares por ciclo (τ_s ≈ W/2S).`);
+  }});
+
+// ---------------------------------------------------------------------------
+// Bucle
+// ---------------------------------------------------------------------------
+const panels = [rad, aug, srh, surf];
+panels.forEach((p, i) => { p.t = i*.7; p.clock = 0; p.fired = new Set(); });
+let pausa = false, vel = 1, last = performance.now();
+document.getElementById('bP').onclick = e => { pausa = !pausa; e.target.textContent = pausa ? '▶ Continuar' : '⏸ Pausa'; };
+document.getElementById('vel').oninput = e => { vel = parseFloat(e.target.value); };
+const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (reduce) vel = .5;
+function loop(now){
+  const dt = pausa ? 0 : Math.min(.05, (now - last)/1000) * vel; last = now;
+  if (document.hidden || !document.body.clientWidth) { requestAnimationFrame(loop); return; }
+  for (const p of panels){
+    p.t += dt; p.clock += dt;
+    const cyc = Math.floor(p.t / p.period), t = p.t - cyc*p.period;
+    const g = geom(p);
+    if (cyc !== p.cyc){ p.cyc = cyc; p.fired = new Set(); p.onCycle && p.onCycle(p, g); }
+    drawBands(p, g);
+    p.frame(p, t, g);
+    drawFx(p, dt);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

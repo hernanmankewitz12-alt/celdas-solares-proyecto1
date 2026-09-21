@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --bg:#0b1020; --panel:rgba(17,24,44,.84); --line:rgba(255,255,255,.09);
+    --text:#e6e9f2; --dim:#96a0b8; --amber:#f5b83d;
+    --e:#4da3ff; --h:#ff5a5f; --don:#3ddc97; --acc:#ffa53d; --trap:#b07cff;
+    --rad:#ffe066; --aug:#ff8c42; --srh:#b07cff; --surf:#2ec4b6; --dang:#ff7b7b;
+  }
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font:12.5px/1.4 "Segoe UI",system-ui,-apple-system,sans-serif;overflow:hidden}
+  #c{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
+  #c:active{cursor:grabbing}
+  .panel{position:absolute;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px;backdrop-filter:blur(6px)}
+  #info{top:10px;left:10px;width:218px}
+  #stats{top:10px;right:10px;width:272px}
+  h3{margin:0 0 2px;font-size:13.5px;font-weight:650;letter-spacing:.01em}
+  .sub{color:var(--dim);font-size:11.5px;margin-bottom:8px}
+  .leg{display:grid;grid-template-columns:14px 1fr;gap:4px 8px;align-items:center;font-size:11.5px}
+  .sw{width:11px;height:11px;border-radius:50%}
+  .sw.ring{background:transparent;border:2px solid var(--h);width:7px;height:7px}
+  .sw.bar{height:3px;border-radius:2px;width:12px}
+  .sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin:9px 0 5px}
+  .kv{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums}
+  .kv b{font-weight:600}
+  .mech{display:grid;grid-template-columns:10px 1fr auto;gap:2px 7px;align-items:center;margin:5px 0 1px}
+  .mech .nm{font-size:11.5px}
+  .mech .pc{font-variant-numeric:tabular-nums;font-size:11px;color:var(--dim)}
+  .track{grid-column:2 / 4;height:6px;border-radius:3px;background:rgba(255,255,255,.06);position:relative;overflow:hidden}
+  .track .obs{position:absolute;left:0;top:0;bottom:0;border-radius:3px}
+  .track .exp{position:absolute;top:-1px;bottom:-1px;width:2px;background:#fff;opacity:.85}
+  #spark{width:100%;height:58px;display:block;margin-top:4px}
+  .note{font-size:10.5px;color:var(--dim);margin-top:3px}
+  #ctrl{bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:6px;
+    align-items:center;padding:7px 9px;white-space:nowrap}
+  button{background:#1b2440;color:var(--text);border:1px solid #2c3760;border-radius:8px;
+    padding:6px 10px;font:inherit;cursor:pointer;transition:background .15s}
+  button:hover{background:#243058}
+  button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  button.on{background:var(--amber);color:#1a1300;border-color:var(--amber);font-weight:650}
+  #bLuz.on{box-shadow:0 0 14px rgba(245,184,61,.55)}
+  label.sp{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:11.5px;margin-left:4px}
+  input[type=range]{width:86px;accent-color:var(--amber)}
+  #toast{position:absolute;bottom:84px;left:50%;transform:translateX(-50%);
+    background:rgba(10,14,28,.9);border:1px solid var(--line);border-radius:999px;
+    padding:6px 14px;font-size:12.5px;opacity:0;transition:opacity .35s;pointer-events:none;
+    max-width:44%;text-align:center}
+  #toast i{font-style:normal;font-weight:650}
+  summary.sec{cursor:pointer}
+  #hint{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);color:var(--dim);
+    font-size:11px;pointer-events:none}
+  #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    text-align:center;padding:30px;color:var(--dim)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="info" class="panel">
+  <h3>Bloque de silicio</h3>
+  <div class="sub" id="subt"></div>
+  <div class="leg">
+    <span class="sw" style="background:#aab4c8"></span><span>Si (red diamante)</span>
+    <span class="sw" style="background:var(--don)" id="lgDon"></span><span id="lgDonT">P⁺ donador ionizado</span>
+    <span class="sw" style="background:var(--acc)" id="lgAcc"></span><span id="lgAccT">B⁻ aceptor ionizado</span>
+    <span class="sw" style="background:var(--trap)"></span><span>Trampa (defecto, SRH)</span>
+    <span class="sw" style="background:var(--e);box-shadow:0 0 6px var(--e)"></span><span>Electrón e⁻ libre</span>
+    <span class="sw ring"></span><span>Hueco h⁺ libre</span>
+    <span class="sw bar" style="background:var(--dang)"></span><span>Enlace insatisfecho (superficie)</span>
+    <span class="sw" style="background:#fff3b0;box-shadow:0 0 6px #fff3b0"></span><span>Fotón de luz incidente</span>
+  </div>
+  <details><summary class="sec">Qué gobierna la animación</summary>
+  <div class="note" id="notas"></div></details>
+</div>
+
+<div id="stats" class="panel">
+  <div class="sec" style="margin-top:0">Portadores dibujados ahora</div>
+  <div class="kv"><span>e⁻ libres</span><b id="sE">0</b></div>
+  <div class="kv"><span>huecos libres</span><b id="sH">0</b></div>
+  <div class="kv"><span>pares creados (luz · térmicos)</span><b id="sG">0 · 0</b></div>
+  <div class="sec">Recombinaciones <span id="modo" style="text-transform:none;letter-spacing:0"></span></div>
+  <div id="mechs"></div>
+  <div class="note">Barra = observado en esta animación · línea blanca = esperado según 1/τ de cada mecanismo</div>
+  <div class="sec">Portadores en exceso vs. tiempo</div>
+  <canvas id="spark"></canvas>
+  <div class="note">Con luz sube como 1−e<sup>−t/τ</sup>; al apagar cae como e<sup>−t/τ</sup>.</div>
+</div>
+
+<div id="toast"></div>
+<div id="hint">Arrastra para rotar · rueda para acercar · clic derecho para desplazar</div>
+
+<div id="ctrl" class="panel">
+  <button id="bLuz">☀ Iluminar</button>
+  <button id="bPausa">⏸ Pausa</button>
+  <button id="bRot" class="on">⟳ Rotación</button>
+  <button id="bEnl" class="on">Enlaces</button>
+  <button id="bPesos">Pesos: físicos</button>
+  <label class="sp">velocidad <input id="vel" type="range" min="0.25" max="3" step="0.25" value="1"></label>
+</div>
+<div id="err">No se pudo cargar el motor 3D (WebGL o conexión a cdn.jsdelivr.net).<br>El resto del simulador sigue funcionando.</div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script>
+  window.addEventListener('error', () => { document.getElementById('err').style.display = 'flex'; });
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const P = __PARAMS__;
+
+// ---------------------------------------------------------------------------
+// Paleta (coincide con el resto del simulador)
+// ---------------------------------------------------------------------------
+const COL = { e:0x4da3ff, h:0xff5a5f, don:0x3ddc97, acc:0xffa53d, trap:0xb07cff,
+  si:0xaab4c8, rad:0xffe066, auger:0xff8c42, srh:0xb07cff, surf:0x2ec4b6,
+  dang:0xff7b7b, sun:0xfff3b0, heat:0xffa36b };
+const MECH = [
+  { k:'rad',   nm:'Radiativa',   col:'#ffe066' },
+  { k:'auger', nm:'Auger',       col:'#ff8c42' },
+  { k:'srh',   nm:'SRH (trampas)', col:'#b07cff' },
+  { k:'surf',  nm:'Superficie',  col:'#2ec4b6' },
+];
+
+// Color del fotón radiativo: longitud de onda λ = hc/E_g
+const LAMBDA_NM = 1239.84 / P.Eg;
+function wavelengthColor(nm){
+  if (nm > 780) return new THREE.Color(0xff3d6e);          // infrarrojo (se dibuja magenta)
+  if (nm < 380) return new THREE.Color(0x9b5de5);          // ultravioleta
+  let r=0,g=0,b=0;
+  if (nm<440){r=-(nm-440)/60;b=1}else if(nm<490){g=(nm-440)/50;b=1}
+  else if(nm<510){g=1;b=-(nm-510)/20}else if(nm<580){r=(nm-510)/70;g=1}
+  else if(nm<645){r=1;g=-(nm-645)/65}else{r=1}
+  return new THREE.Color(r,g,b);
+}
+const PHOTON_COL = wavelengthColor(LAMBDA_NM);
+
+// ---------------------------------------------------------------------------
+// Escena
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1020);
+scene.fog = new THREE.Fog(0x0b1020, 13, 24);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+camera.position.set(7.0, 4.2, 7.8);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.autoRotate = true; controls.autoRotateSpeed = 0.55;
+controls.minDistance = 3; controls.maxDistance = 15;
+controls.target.set(0, -0.1, 0);
+
+function resize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize); resize();
+
+scene.add(new THREE.HemisphereLight(0xcfd8ff, 0x1a1f33, 0.9));
+const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(4, 6, 5); scene.add(key);
+const sunLight = new THREE.PointLight(0xffd27a, 0, 12); sunLight.position.set(0, 3.2, 0); scene.add(sunLight);
+
+// Texturas procedurales (brillo radial y anillo para huecos)
+function makeGlowTex(){
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'); const r = g.createRadialGradient(64,64,0,64,64,64);
+  r.addColorStop(0,'rgba(255,255,255,1)'); r.addColorStop(.22,'rgba(255,255,255,.6)');
+  r.addColorStop(.55,'rgba(255,255,255,.12)'); r.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0,0,128,128); return new THREE.CanvasTexture(c);
+}
+function makeRingTex(){
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'); g.strokeStyle = '#fff'; g.lineWidth = 15;
+  g.shadowColor = '#fff'; g.shadowBlur = 12;
+  g.beginPath(); g.arc(64,64,40,0,Math.PI*2); g.stroke(); return new THREE.CanvasTexture(c);
+}
+function makeLabel(text, color, h = 0.22){
+  const c = document.createElement('canvas'); const g = c.getContext('2d');
+  const fs = 44; g.font = `600 ${fs}px Segoe UI, system-ui, sans-serif`;
+  const w = Math.ceil(g.measureText(text).width) + 24; c.width = w; c.height = fs + 22;
+  g.font = `600 ${fs}px Segoe UI, system-ui, sans-serif`; g.fillStyle = color;
+  g.textBaseline = 'middle'; g.fillText(text, 12, c.height / 2);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, depthWrite:false, transparent:true }));
+  s.scale.set(h * w / c.height, h, 1); return s;
+}
+const GLOW = makeGlowTex(), RING = makeRingTex();
+
+// ---------------------------------------------------------------------------
+// Red diamante real: FCC + base de 2 átomos, enlaces por distancia de primer
+// vecino (a·√3/4). Bloque de NC×NC×NC celdas convencionales, centrado en 0.
+// ---------------------------------------------------------------------------
+const NC = 3, H = NC / 2;
+const FCC = [[0,0,0],[0,.5,.5],[.5,0,.5],[.5,.5,0]];
+const DIRS0 = [[1,1,1],[1,-1,-1],[-1,1,-1],[-1,-1,1]].map(d => new THREE.Vector3(...d).multiplyScalar(.25));
+const keyOf = (x,y,z) => `${Math.round((x+H)*4)},${Math.round((y+H)*4)},${Math.round((z+H)*4)}`;
+
+let sites = [];
+for (let i=-1;i<=NC;i++) for (let j=-1;j<=NC;j++) for (let k=-1;k<=NC;k++)
+  for (const b of FCC) for (const s of [0,1]) {
+    const x=i+b[0]+s*.25, y=j+b[1]+s*.25, z=k+b[2]+s*.25, eps=1e-6;
+    if (x<-eps||y<-eps||z<-eps||x>NC+eps||y>NC+eps||z>NC+eps) continue;
+    sites.push({ p:new THREE.Vector3(x-H,y-H,z-H), sub:s });
+  }
+function neighbors(list){
+  const map = new Map(list.map((s,i) => [keyOf(s.p.x,s.p.y,s.p.z), i]));
+  return list.map(s => (s.sub===0 ? DIRS0 : DIRS0.map(d => d.clone().negate())).map(d => {
+    const q = s.p.clone().add(d); return { d, j: map.has(keyOf(q.x,q.y,q.z)) ? map.get(keyOf(q.x,q.y,q.z)) : -1 };
+  }));
+}
+// Se descartan los átomos con <2 enlaces (esquinas sueltas) para que el bloque se vea limpio
+for (let pass=0; pass<3; pass++){
+  const nb = neighbors(sites);
+  sites = sites.filter((s,i) => nb[i].filter(n => n.j >= 0).length >= 2);
+}
+const NB = neighbors(sites);
+const bonds = [], dangling = [];
+NB.forEach((list,i) => list.forEach(n => {
+  if (n.j >= 0) { if (i < n.j) bonds.push([i, n.j]); }
+  else dangling.push([i, n.d]);
+}));
+const NS = sites.length;
+const isSurface = NB.map(l => l.some(n => n.j < 0));
+const interior = [...Array(NS).keys()].filter(i => !isSurface[i]);
+
+// Elección de sitios especiales (dopantes y trampas) en el interior del bloque
+function shuffle(a){ for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+const pool = shuffle(interior.slice());
+const nDon = Math.min(P.n_don, pool.length), nAcc = Math.min(P.n_acc, pool.length - nDon);
+const donSites = pool.splice(0, nDon), accSites = pool.splice(0, nAcc);
+const trapSites = pool.splice(0, Math.min(P.n_traps, pool.length));
+const special = new Map();
+donSites.forEach(i => special.set(i,'don')); accSites.forEach(i => special.set(i,'acc'));
+trapSites.forEach(i => special.set(i,'trap'));
+
+// Mallas instanciadas: átomos, enlaces y enlaces insatisfechos
+const atomGeo = new THREE.SphereGeometry(0.085, 20, 14);
+const atomMat = new THREE.MeshStandardMaterial({ roughness:.35, metalness:.25 });
+const atoms = new THREE.InstancedMesh(atomGeo, atomMat, NS);
+const baseCol = [];
+for (let i=0;i<NS;i++){
+  const t = special.get(i);
+  const c = new THREE.Color(t==='don'?COL.don : t==='acc'?COL.acc : t==='trap'?COL.trap : COL.si);
+  baseCol.push(c); atoms.setColorAt(i, c);
+}
+scene.add(atoms);
+
+const cyl = new THREE.CylinderGeometry(0.022, 0.022, 1, 8, 1, true);
+const bondMat = new THREE.MeshStandardMaterial({ color:0x7d89a6, roughness:.6, metalness:.1 });
+const bondMesh = new THREE.InstancedMesh(cyl, bondMat, bonds.length);
+bondMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+scene.add(bondMesh);
+const dangMat = new THREE.MeshBasicMaterial({ color:COL.dang, transparent:true, opacity:.55 });
+const dangMesh = new THREE.InstancedMesh(cyl, dangMat, dangling.length);
+scene.add(dangMesh);
+
+// Marcas de carga sobre dopantes ionizados y halo en trampas
+const halos = [];
+donSites.forEach(i => { const l = makeLabel('+', '#3ddc97', .26); l.position.copy(sites[i].p).add(new THREE.Vector3(0,.17,0)); scene.add(l); });
+accSites.forEach(i => { const l = makeLabel('−', '#ffa53d', .26); l.position.copy(sites[i].p).add(new THREE.Vector3(0,.17,0)); scene.add(l); });
+trapSites.forEach(i => {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:GLOW, color:COL.trap, blending:THREE.AdditiveBlending, depthWrite:false, transparent:true, opacity:.35 }));
+  s.scale.setScalar(.45); s.position.copy(sites[i].p); scene.add(s); halos.push({ i, s, busy:0 });
+});
+
+// Caja de vidrio y caras frontal/posterior
+const box = new THREE.BoxGeometry(NC+.3, NC+.3, NC+.3);
+scene.add(new THREE.LineSegments(new THREE.EdgesGeometry(box), new THREE.LineBasicMaterial({ color:0x34426e })));
+const faceGeo = new THREE.PlaneGeometry(NC+.3, NC+.3);
+const frontFace = new THREE.Mesh(faceGeo, new THREE.MeshBasicMaterial({ color:0xf5b83d, transparent:true, opacity:.05, side:THREE.DoubleSide, depthWrite:false }));
+frontFace.rotation.x = -Math.PI/2; frontFace.position.y = H+.15; scene.add(frontFace);
+const backFace = new THREE.Mesh(faceGeo, new THREE.MeshBasicMaterial({ color:0x2ec4b6, transparent:true, opacity:.035, side:THREE.DoubleSide, depthWrite:false }));
+backFace.rotation.x = -Math.PI/2; backFace.position.y = -H-.15; scene.add(backFace);
+const lblF = makeLabel(`cara frontal (iluminada) · S = ${P.S_txt} cm/s`, '#f5b83d', .2); lblF.position.set(0, H+.45, H+.2); scene.add(lblF);
+const lblB = makeLabel('cara posterior', '#6fd6cc', .18); lblB.position.set(0, -H-.42, H+.2); scene.add(lblB);
+
+// Vibración térmica de la red: amplitud ∝ √T, más "calor" local tras cada evento con fonones
+const phase = sites.map(() => [Math.random()*6.28, Math.random()*6.28, Math.random()*6.28]);
+const heat = new Float32Array(NS);
+const posNow = sites.map(s => s.p.clone());
+const AMP_T = 0.014 * Math.sqrt(P.T / 300);
+const M4 = new THREE.Matrix4(), Q4 = new THREE.Quaternion(), S3 = new THREE.Vector3(), UP = new THREE.Vector3(0,1,0);
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+function placeCyl(mesh, idx, a, b){
+  tmpA.subVectors(b, a); const len = tmpA.length(); tmpA.divideScalar(len);
+  Q4.setFromUnitVectors(UP, tmpA); tmpB.addVectors(a, b).multiplyScalar(.5);
+  S3.set(1, len, 1); M4.compose(tmpB, Q4, S3); mesh.setMatrixAt(idx, M4);
+}
+function updateLattice(t, dt){
+  const hotC = new THREE.Color(COL.heat);
+  for (let i=0;i<NS;i++){
+    heat[i] *= Math.exp(-dt / 1.1);
+    const a = AMP_T + 0.07 * heat[i], ph = phase[i], w = 9 + 6 * heat[i];
+    posNow[i].set(sites[i].p.x + a*Math.sin(t*w+ph[0]), sites[i].p.y + a*Math.sin(t*w*1.13+ph[1]), sites[i].p.z + a*Math.sin(t*w*.91+ph[2]));
+    const sc = special.get(i)==='trap' ? 1.3 : (special.has(i) ? 1.15 : 1);
+    S3.setScalar(sc); M4.compose(posNow[i], Q4.identity(), S3); atoms.setMatrixAt(i, M4);
+    if (heat[i] > 0.02 || atoms.userData.dirty?.[i]){ atoms.setColorAt(i, baseCol[i].clone().lerp(hotC, Math.min(1, heat[i]*1.3))); }
+  }
+  atoms.instanceMatrix.needsUpdate = true; if (atoms.instanceColor) atoms.instanceColor.needsUpdate = true;
+  bonds.forEach(([i,j], k) => placeCyl(bondMesh, k, posNow[i], posNow[j]));
+  bondMesh.instanceMatrix.needsUpdate = true;
+  dangling.forEach(([i,d], k) => { tmpA.copy(posNow[i]).addScaledVector(d, .55); placeCyl(dangMesh, k, posNow[i], tmpA); });
+  dangMesh.instanceMatrix.needsUpdate = true;
+}
+function heatAround(p, r = .9, amt = .8){
+  for (let i=0;i<NS;i++){ const d = sites[i].p.distanceTo(p); if (d < r) heat[i] = Math.min(1, heat[i] + amt*(1 - d/r)); }
+}
+
+// ---------------------------------------------------------------------------
+// Partículas de efecto: fonones (chispas), destellos, fotones, manchas en superficie
+// ---------------------------------------------------------------------------
+const MAXS = 600;
+const spGeo = new THREE.BufferGeometry();
+const spPos = new Float32Array(MAXS*3), spCol = new Float32Array(MAXS*3);
+spGeo.setAttribute('position', new THREE.BufferAttribute(spPos, 3));
+spGeo.setAttribute('color', new THREE.BufferAttribute(spCol, 3));
+const sparks = new THREE.Points(spGeo, new THREE.PointsMaterial({ size:.07, map:GLOW, vertexColors:true, transparent:true, depthWrite:false, blending:THREE.AdditiveBlending }));
+scene.add(sparks);
+const spV = Array.from({length:MAXS}, () => new THREE.Vector3()), spL = new Float32Array(MAXS), spC = Array.from({length:MAXS}, () => new THREE.Color());
+let spHead = 0;
+function emitSparks(p, n, color = COL.heat, speed = .9){
+  for (let k=0;k<n;k++){
+    const i = spHead = (spHead + 1) % MAXS;
+    spPos[i*3]=p.x; spPos[i*3+1]=p.y; spPos[i*3+2]=p.z;
+    spV[i].copy(randDir()).multiplyScalar(speed * (.4 + Math.random())); spL[i] = .7 + Math.random()*.5;
+    spC[i].setHex(color);
+  }
+}
+function updateSparks(dt){
+  for (let i=0;i<MAXS;i++){
+    if (spL[i] <= 0){ spCol[i*3]=spCol[i*3+1]=spCol[i*3+2]=0; continue; }
+    spL[i] -= dt; spV[i].multiplyScalar(Math.exp(-dt*2.2));
+    spPos[i*3]+=spV[i].x*dt; spPos[i*3+1]+=spV[i].y*dt; spPos[i*3+2]+=spV[i].z*dt;
+    const f = Math.max(0, spL[i]); spCol[i*3]=spC[i].r*f; spCol[i*3+1]=spC[i].g*f; spCol[i*3+2]=spC[i].b*f;
+  }
+  spGeo.attributes.position.needsUpdate = true; spGeo.attributes.color.needsUpdate = true;
+}
+
+const fx = [];
+function flash(p, color, size = 1){
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:GLOW, color, blending:THREE.AdditiveBlending, depthWrite:false, transparent:true }));
+  s.position.copy(p); scene.add(s);
+  fx.push({ t:0, dur:.55, upd(u){ s.scale.setScalar((.25 + 1.1*u) * size); s.material.opacity = 1 - u; }, end(){ scene.remove(s); s.material.dispose(); } });
+}
+function beam(a, b, color){
+  const g = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+  const l = new THREE.Line(g, new THREE.LineDashedMaterial({ color, dashSize:.08, gapSize:.05, transparent:true }));
+  l.computeLineDistances(); scene.add(l);
+  fx.push({ t:0, dur:.6, upd(u){ l.material.opacity = 1 - u; }, end(){ scene.remove(l); g.dispose(); } });
+}
+function surfaceSpot(p){
+  const m = new THREE.Mesh(new THREE.RingGeometry(.03, .09, 40), new THREE.MeshBasicMaterial({ color:COL.surf, transparent:true, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false }));
+  m.rotation.x = -Math.PI/2; m.position.copy(p); scene.add(m);
+  fx.push({ t:0, dur:1.3, upd(u){ m.scale.setScalar(1 + 5*u); m.material.opacity = 1 - u; }, end(){ scene.remove(m); m.geometry.dispose(); } });
+}
+// Fotón: punto brillante con estela. mode 'in' = luz incidente que se absorbe a cierta profundidad
+function photon(p0, dir, color, mode, onAbsorb){
+  const g = new THREE.Group();
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:GLOW, color, blending:THREE.AdditiveBlending, depthWrite:false, transparent:true }));
+  s.scale.setScalar(mode==='in' ? .26 : .34); g.add(s);
+  const tg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), dir.clone().multiplyScalar(-.45)]);
+  const tail = new THREE.Line(tg, new THREE.LineBasicMaterial({ color, transparent:true, opacity:.8 })); g.add(tail);
+  g.position.copy(p0); scene.add(g);
+  const speed = mode==='in' ? 3.2 : 3.8;
+  const stopY = mode==='in' ? H - Math.min(NC - .2, -Math.log(1 - Math.random()*.95) * NC * .32) : null;
+  fx.push({ t:0, dur:1e9, upd(){
+    g.position.addScaledVector(dir, speed * DT);
+    if (mode==='in' && g.position.y <= stopY){ onAbsorb(g.position.clone()); return true; }
+    if (g.position.length() > 8) return true;
+  }, end(){ scene.remove(g); s.material.dispose(); tg.dispose(); } });
+}
+function updateFx(dt){
+  for (let k=fx.length-1;k>=0;k--){
+    const f = fx[k]; f.t += dt; const u = Math.min(1, f.t / f.dur);
+    const done = f.upd(u) === true || u >= 1;
+    if (done){ f.end(); fx.splice(k,1); }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Portadores móviles: e⁻ (esfera azul) y huecos (anillo rojo = electrón faltante)
+// Rapidez de paseo ∝ velocidad térmica √(kT/m*)
+// ---------------------------------------------------------------------------
+const eGeo = new THREE.SphereGeometry(.062, 18, 12);
+const eMat = new THREE.MeshStandardMaterial({ color:COL.e, emissive:COL.e, emissiveIntensity:.9, roughness:.3 });
+const carriers = [];
+function randDir(){ const u = Math.random()*2-1, th = Math.random()*6.2832, r = Math.sqrt(1-u*u); return new THREE.Vector3(r*Math.cos(th), u, r*Math.sin(th)); }
+function vth(type){ const m = type==='e' ? P.me_rel : P.mh_rel; return .5 * Math.sqrt((P.T/300) * (1.08/m)); }
+const TRAIL = 16;
+function addCarrier(type, pos, vel){
+  const col = type==='e' ? COL.e : COL.h;
+  const grp = new THREE.Group();
+  const core = type==='e' ? new THREE.Mesh(eGeo, eMat)
+    : new THREE.Sprite(new THREE.SpriteMaterial({ map:RING, color:COL.h, depthWrite:false, transparent:true }));
+  if (type==='h') core.scale.setScalar(.2);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map:GLOW, color:col, blending:THREE.AdditiveBlending, depthWrite:false, transparent:true, opacity:.75 }));
+  glow.scale.setScalar(type==='e' ? .42 : .34);
+  grp.add(core, glow); grp.position.copy(pos); grp.scale.setScalar(.01); scene.add(grp);
+  const arr = new Float32Array(TRAIL*3); for (let i=0;i<TRAIL;i++){ arr[i*3]=pos.x; arr[i*3+1]=pos.y; arr[i*3+2]=pos.z; }
+  const tg = new THREE.BufferGeometry(); tg.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  const trail = new THREE.Line(tg, new THREE.LineBasicMaterial({ color:col, transparent:true, opacity:.3 }));
+  scene.add(trail);
+  const c = { type, grp, glow, core, trail, arr, base:new THREE.Color(col),
+    vel: vel || randDir().multiplyScalar(vth(type)), task:null, dying:false, hot:0, born:0 };
+  carriers.push(c); return c;
+}
+function removeCarrier(c){
+  scene.remove(c.grp); scene.remove(c.trail); c.trail.geometry.dispose(); c.glow.material.dispose();
+  if (c.type==='h') c.core.material.dispose();
+  const i = carriers.indexOf(c); if (i >= 0) carriers.splice(i, 1);
+}
+function goTo(c, to, done){
+  const from = c.grp.position.clone(); const dur = .35 + from.distanceTo(to) * .32;
+  c.task = { t:0, dur, from, to:to.clone(), done };
+}
+const LIM = H - .08;
+const hotC = new THREE.Color(0xfff0d0);
+function updateCarrier(c, dt){
+  c.born = Math.min(1, c.born + dt*4); c.grp.scale.setScalar(.2 + .8*c.born);
+  const p = c.grp.position;
+  if (c.task){
+    const k = c.task; k.t += dt; const u = Math.min(1, k.t / k.dur);
+    const e = u < .5 ? 2*u*u : 1 - Math.pow(-2*u + 2, 2) / 2;
+    p.lerpVectors(k.from, k.to, e);
+    if (u >= 1){ c.task = null; k.done && k.done(c); }
+  } else if (!c.dying){
+    if (Math.random() < dt / .35) c.vel.copy(randDir()).multiplyScalar(vth(c.type) * (1 + 6*c.hot));
+    p.addScaledVector(c.vel, dt);
+    for (const ax of ['x','y','z']){
+      if (p[ax] > LIM){ p[ax] = LIM; c.vel[ax] = -Math.abs(c.vel[ax]); }
+      if (p[ax] < -LIM){ p[ax] = -LIM; c.vel[ax] = Math.abs(c.vel[ax]); }
+    }
+  }
+  if (c.hot > 0){
+    c.hot = Math.max(0, c.hot - dt / 1.7);
+    c.vel.setLength(vth(c.type) * (1 + 6*c.hot));
+    if (Math.random() < dt * 30 * c.hot){ emitSparks(p, 1, COL.heat, .6); heatAround(p, .5, .25); }
+    c.glow.material.color.copy(c.base).lerp(hotC, c.hot); c.glow.scale.setScalar(.42 * (1 + 1.2*c.hot));
+  }
+  c.arr.copyWithin(3, 0, (TRAIL-1)*3); c.arr[0]=p.x; c.arr[1]=p.y; c.arr[2]=p.z;
+  c.trail.geometry.attributes.position.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------------------
+// Estado de la simulación
+// ---------------------------------------------------------------------------
+const TAU_VIS = 3.0;                 // s de animación: vida media visual del exceso de portadores
+let luz = !!P.luz, pesosIguales = !!P.demo, pausa = false, velocidad = 1;
+const obs = { rad:0, auger:0, srh:0, surf:0 };
+let genLuz = 0, genTerm = 0;
+
+function randomInside(){ return new THREE.Vector3((Math.random()*2-1)*LIM, (Math.random()*2-1)*LIM, (Math.random()*2-1)*LIM); }
+for (let i=0;i<P.n_e_eq;i++){ const c = addCarrier('e', randomInside()); c.born = 1; }
+for (let i=0;i<P.n_h_eq;i++){ const c = addCarrier('h', randomInside()); c.born = 1; }
+
+function alive(type){ return carriers.filter(c => c.type===type && !c.dying); }
+function free(type, excl = []){ return carriers.filter(c => c.type===type && !c.dying && !c.task && !excl.includes(c)); }
+function nearest(list, p){ let best = null, bd = 1e9; for (const c of list){ const d = c.grp.position.distanceTo(p); if (d < bd){ bd = d; best = c; } } return best; }
+
+function createPair(p, fromLight){
+  const d = randDir(); const s = .9;
+  addCarrier('e', p.clone(), d.clone().multiplyScalar(vth('e') * 1.6 * s));
+  addCarrier('h', p.clone(), d.clone().negate().multiplyScalar(vth('h') * 1.6 * s));
+  if (fromLight) genLuz++; else genTerm++;
+}
+
+// Los cuatro mecanismos de recombinación
+function weights(){
+  if (pesosIguales) return { rad:1, auger:1, srh:1, surf:1 };
+  return P.w;
+}
+function pickMech(){
+  const w = weights(); const tot = w.rad + w.auger + w.srh + w.surf; let r = Math.random() * tot;
+  for (const m of MECH){ r -= w[m.k]; if (r <= 0) return m.k; } return 'surf';
+}
+function recombine(){
+  const es = free('e'), hs = free('h'); if (!es.length || !hs.length) return;
+  const e = es[Math.floor(Math.random()*es.length)]; const h = nearest(hs, e.grp.position);
+  let mech = pickMech();
+  if (mech === 'auger'){
+    const tercType = alive('e').length >= alive('h').length ? 'e' : 'h';
+    const third = nearest(free(tercType, [e, h]), e.grp.position);
+    if (!third) mech = 'srh'; else return doAuger(e, h, third);
+  }
+  if (mech === 'srh' && !trapSites.length) mech = 'surf';
+  if (mech === 'rad') return doRad(e, h);
+  if (mech === 'srh') return doSRH(e, h);
+  return doSurf(e, h);
+}
+function both(n, fn){ let k = 0; return () => { if (++k === n) fn(); }; }
+function doRad(e, h){
+  e.dying = h.dying = true;
+  const m = e.grp.position.clone().add(h.grp.position).multiplyScalar(.5);
+  const fin = both(2, () => { removeCarrier(e); removeCarrier(h); flash(m, PHOTON_COL, 1.1); photon(m, randDir(), PHOTON_COL, 'out'); obs.rad++; toast('rad'); });
+  goTo(e, m, fin); goTo(h, m, fin);
+}
+function doAuger(e, h, third){
+  e.dying = h.dying = true;
+  const m = e.grp.position.clone().add(h.grp.position).multiplyScalar(.5);
+  const fin = both(2, () => {
+    removeCarrier(e); removeCarrier(h); flash(m, COL.auger, 1);
+    beam(m, third.grp.position, COL.auger);
+    third.hot = 1; third.vel.copy(randDir()).multiplyScalar(vth(third.type) * 7);
+    obs.auger++; toast('auger');
+  });
+  goTo(e, m, fin); goTo(h, m, fin);
+}
+function doSRH(e, h){
+  e.dying = h.dying = true;
+  const ti = trapSites.reduce((b, i) => sites[i].p.distanceTo(e.grp.position) < sites[b].p.distanceTo(e.grp.position) ? i : b, trapSites[0]);
+  const tp = sites[ti].p.clone(); const halo = halos.find(x => x.i === ti);
+  goTo(e, tp, () => {
+    halo.busy++; emitSparks(tp, 6, COL.heat, .7); heatAround(tp, .7, .5);
+    goTo(h, tp, () => {
+      removeCarrier(e); removeCarrier(h); halo.busy = Math.max(0, halo.busy - 1);
+      flash(tp, COL.srh, 1); emitSparks(tp, 14, COL.heat, 1); heatAround(tp, 1, .9);
+      obs.srh++; toast('srh');
+    });
+  });
+  h.task = null;   // el hueco espera su turno quieto
+}
+function doSurf(e, h){
+  e.dying = h.dying = true;
+  const m = e.grp.position.clone().add(h.grp.position).multiplyScalar(.5);
+  const y = m.y >= 0 ? H + .02 : -H - .02;
+  const q = new THREE.Vector3(m.x, y, m.z);
+  const fin = both(2, () => {
+    removeCarrier(e); removeCarrier(h); surfaceSpot(q.clone().setY(y > 0 ? H + .15 : -H - .15));
+    emitSparks(q, 12, COL.heat, .9); heatAround(q, .8, .8); obs.surf++; toast('surf');
+  });
+  goTo(e, q, fin); goTo(h, q, fin);
+}
+
+// ---------------------------------------------------------------------------
+// HUD
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+$('subt').textContent = P.subtitulo;
+$('notas').innerHTML = P.notas_html;
+if (!P.n_don) { $('lgDon').style.opacity = .3; $('lgDonT').style.opacity = .45; }
+if (!P.n_acc) { $('lgAcc').style.opacity = .3; $('lgAccT').style.opacity = .45; }
+$('mechs').innerHTML = MECH.map(m => `
+  <div class="mech"><span class="sw" style="background:${m.col}"></span><span class="nm">${m.nm}</span><span class="pc" id="pc_${m.k}"></span>
+  <div class="track"><div class="obs" id="ob_${m.k}" style="background:${m.col}"></div><div class="exp" id="ex_${m.k}"></div></div></div>`).join('');
+
+const TOASTS = {
+  rad:  `<i style="color:#ffe066">Radiativa</i> · e⁻ cae sobre el hueco y sale un fotón hν ≈ E<sub>g</sub> (λ ≈ ${LAMBDA_NM.toFixed(0)} nm${LAMBDA_NM>780?', infrarrojo':''})`,
+  auger:`<i style="color:#ff8c42">Auger</i> · la energía no sale como luz: la recibe un 3<sup>er</sup> portador, que se calienta y cede fonones`,
+  srh:  `<i style="color:#b07cff">SRH</i> · el e⁻ cae en una trampa (defecto) y luego llega el hueco → calor`,
+  surf: `<i style="color:#2ec4b6">Superficie</i> · recombinan en los enlaces insatisfechos de la cara → calor`,
+  luz:  `<i style="color:#fff3b0">Generación</i> · un fotón absorbido rompe un enlace y crea un par e⁻-hueco`,
+  term: `<i style="color:#cfd6e6">Generación térmica</i> · la vibración de la red rompe un enlace`,
+};
+let toastT = 0;
+function toast(k){ $('toast').innerHTML = TOASTS[k]; $('toast').style.opacity = 1; toastT = 2.4; }
+
+function refreshHUD(){
+  $('sE').textContent = alive('e').length; $('sH').textContent = alive('h').length;
+  $('sG').textContent = `${genLuz} · ${genTerm}`;
+  const w = weights(); const wt = w.rad + w.auger + w.srh + w.surf;
+  const ot = obs.rad + obs.auger + obs.srh + obs.surf;
+  $('modo').textContent = pesosIguales ? '· modo demostración (pesos iguales)' : '· pesos = 1/τ reales';
+  for (const m of MECH){
+    const ex = 100 * w[m.k] / wt, ob = ot ? 100 * obs[m.k] / ot : 0;
+    $('ex_'+m.k).style.left = `calc(${ex}% - 1px)`; $('ob_'+m.k).style.width = ob + '%';
+    $('pc_'+m.k).textContent = `${obs[m.k]} · esp. ${ex < 0.1 && ex > 0 ? '<0.1' : ex.toFixed(ex < 10 ? 1 : 0)}%`;
+  }
+}
+
+// Minigráfico del exceso de portadores
+const spk = $('spark'), sg = spk.getContext('2d'); const hist = []; let histT = 0;
+function drawSpark(){
+  const w = spk.clientWidth, h = spk.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (spk.width !== w*dpr){ spk.width = w*dpr; spk.height = h*dpr; }
+  sg.setTransform(dpr,0,0,dpr,0,0); sg.clearRect(0,0,w,h);
+  const mx = Math.max(4, P.n_exc * 1.4, ...hist.map(x => x.v));
+  sg.strokeStyle = 'rgba(255,255,255,.08)'; sg.lineWidth = 1;
+  sg.beginPath(); sg.moveTo(0, h-1); sg.lineTo(w, h-1); sg.stroke();
+  const yT = h - 2 - (P.n_exc / mx) * (h - 6);
+  sg.setLineDash([3,3]); sg.strokeStyle = 'rgba(245,184,61,.45)'; sg.beginPath(); sg.moveTo(0,yT); sg.lineTo(w,yT); sg.stroke(); sg.setLineDash([]);
+  sg.fillStyle = 'rgba(245,184,61,.7)'; sg.font = '10px Segoe UI'; sg.fillText('estado estacionario con luz', 4, Math.max(10, yT - 3));
+  if (hist.length < 2) return;
+  sg.beginPath();
+  hist.forEach((pt, i) => { const x = (i / 299) * w, y = h - 2 - (pt.v / mx) * (h - 6); i ? sg.lineTo(x, y) : sg.moveTo(x, y); });
+  sg.strokeStyle = '#4da3ff'; sg.lineWidth = 1.8; sg.stroke();
+  const last = hist[hist.length-1];
+  sg.fillStyle = last.l ? '#f5b83d' : '#96a0b8'; sg.beginPath();
+  sg.arc(((hist.length-1)/299)*w, h - 2 - (last.v/mx)*(h-6), 3, 0, 6.3); sg.fill();
+}
+
+// Controles
+function setBtn(id, on, txtOn, txtOff){ const b = $(id); b.classList.toggle('on', on); if (txtOn) b.textContent = on ? txtOn : txtOff; }
+setBtn('bLuz', luz, '☀ Luz encendida', '☀ Iluminar');
+setBtn('bPesos', pesosIguales, 'Pesos: iguales (demo)', 'Pesos: físicos');
+$('bLuz').onclick = () => { luz = !luz; setBtn('bLuz', luz, '☀ Luz encendida', '☀ Iluminar'); };
+$('bPausa').onclick = () => { pausa = !pausa; setBtn('bPausa', pausa, '▶ Continuar', '⏸ Pausa'); };
+$('bRot').onclick = () => { controls.autoRotate = !controls.autoRotate; setBtn('bRot', controls.autoRotate); };
+$('bEnl').onclick = () => { bondMesh.visible = !bondMesh.visible; dangMesh.visible = bondMesh.visible; setBtn('bEnl', bondMesh.visible); };
+$('bPesos').onclick = () => { pesosIguales = !pesosIguales; for (const k in obs) obs[k] = 0; setBtn('bPesos', pesosIguales, 'Pesos: iguales (demo)', 'Pesos: físicos'); };
+$('vel').oninput = e => { velocidad = parseFloat(e.target.value); };
+setTimeout(() => { $('hint').style.opacity = 0; $('hint').style.transition = 'opacity 1s'; }, 6000);
+if (!luz) { $('toast').innerHTML = 'Pulsa <i style="color:#f5b83d">☀ Iluminar</i> para sacar el bloque del equilibrio'; $('toast').style.opacity = 1; toastT = 4; }
+
+// ---------------------------------------------------------------------------
+// Bucle principal
+// ---------------------------------------------------------------------------
+let last = performance.now(), T = 0, hudT = 0, DT = 0;
+function loop(now){
+  requestAnimationFrame(loop);
+  const real = Math.min(.05, (now - last) / 1000); last = now;
+  // Pestaña oculta (iframe sin tamaño) o ventana en segundo plano: no se simula ni se dibuja
+  if (!canvas.clientWidth || document.hidden) return;
+  if (canvas.clientWidth !== renderer.domElement.width / renderer.getPixelRatio()) resize();
+  controls.update();
+  DT = pausa ? 0 : real * velocidad;
+  if (DT > 0){
+    T += DT;
+    // Generación por luz: tasa tal que el exceso estacionario ≈ n_exc (G·τ = Δn)
+    if (luz && Math.random() < DT * P.n_exc / TAU_VIS){
+      const p0 = new THREE.Vector3((Math.random()*2-1)*LIM, H + 2.4, (Math.random()*2-1)*LIM);
+      photon(p0, new THREE.Vector3((Math.random()-.5)*.12, -1, (Math.random()-.5)*.12).normalize(), COL.sun, 'in',
+        p => { flash(p, COL.sun, .8); createPair(p, true); if (Math.random() < .25) toast('luz'); });
+    }
+    // Generación térmica: una vibración rompe un enlace (tasa declarada, crece con T)
+    if (Math.random() < DT * P.r_term && bonds.length){
+      const [i, j] = bonds[Math.floor(Math.random()*bonds.length)];
+      const m = posNow[i].clone().add(posNow[j]).multiplyScalar(.5);
+      heatAround(m, .6, .9); flash(m, 0xffffff, .6); createPair(m, false);
+      if (Math.random() < .35) toast('term');
+    }
+    // Recombinación del exceso sobre el equilibrio: tasa = exceso / τ
+    const exc = Math.min(alive('e').length - P.n_e_eq, alive('h').length - P.n_h_eq);
+    if (exc > 0 && Math.random() < DT * exc / TAU_VIS) recombine();
+
+    for (const c of carriers.slice()) updateCarrier(c, DT);
+    updateLattice(T, DT); updateSparks(DT); updateFx(DT);
+    halos.forEach(x => { x.s.material.opacity = x.busy ? .9 + .1*Math.sin(T*20) : .35; x.s.scale.setScalar(x.busy ? .7 : .45); });
+    sunLight.intensity += ((luz ? 2.2 : 0) - sunLight.intensity) * Math.min(1, DT*3);
+    frontFace.material.opacity = .05 + sunLight.intensity * .05;
+
+    histT += DT;
+    if (histT > .2){ histT = 0; hist.push({ v: Math.max(0, exc), l: luz }); if (hist.length > 300) hist.shift(); }
+  }
+  hudT += real; if (hudT > .25){ hudT = 0; refreshHUD(); drawSpark(); }
+  if (toastT > 0){ toastT -= real; if (toastT <= 0) $('toast').style.opacity = 0; }
+  renderer.render(scene, camera);
+}
+updateLattice(0, 0); refreshHUD();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
